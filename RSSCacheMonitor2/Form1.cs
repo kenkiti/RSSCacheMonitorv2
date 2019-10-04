@@ -25,15 +25,15 @@ namespace RSSCacheMonitor
             public double Bid = 0;
         }
 
-        class DouituYakujou
-        {
-            public long weak = 0;
-            public long strong = 0;
-            public long remains = 0;
-        }
+        //class DouituYakujou
+        //{
+        //    public long weak = 0;
+        //    public long strong = 0;
+        //    public long remains = 0;
+        //}
 
         // SQLite Database
-        private string path = "";
+        private string _path = "";
         private SQLiteConnection connection;
 
         private long currentNo = 1;
@@ -47,23 +47,31 @@ namespace RSSCacheMonitor
         private List<double> sell_100t = new List<double>();
         //private List<ulong> remain = new List<ulong>();
 
-        private ulong strong = 0;
-        private ulong weak = 0;
+        private double strong = 0;
+        private double weak = 0;
         private long max_strong = 0;
         private long min_Weak = 0;
-
 
         const int MAX_COUNT_PRICE = 1000;
         const int MAX_COUNT_TICK = 300;
 
 
+        // オーダーチェック
+        private Order _order = new Order();
+        private double _remain = 0; 
+
+
+        /// <summary>
+        /// TODO: Initialize 関数を作る
+        /// </summary>
+        
+        
+        
         // 同一約定気配分析
-
-
 
         private void MonitoringDatabase()
         {
-            connection = new SQLiteConnection($"Version=3;Data Source={path};Read Only=True;");
+            connection = new SQLiteConnection($"Version=3;Data Source={_path};Read Only=True;");
             connection.Open();
 
             using (SQLiteCommand cmd = connection.CreateCommand())
@@ -118,24 +126,31 @@ namespace RSSCacheMonitor
                                 label4.Text = $"{HistoryBuyTick(strong)}";
                                 //label4.Text = $"{HistoryBuyTick(rec.Tick)}";
                                 ShowChart(rec.Price, 0, strong);
+                                _remain += strong;
                             }
                             else
                             {
                                 label6.Text = $"{HistorySellTick(weak)}";
                                 //label6.Text = $"{HistorySellTick(rec.Tick)}";
                                 ShowChart(rec.Price, weak, 0);
+                                _remain -= weak;
                             }
                             strong = 0;
                             weak = 0;
                             ShowChart2(rec.Price, rec.Vwap);
                             ShowChart3(rec.Price);
                         }
-
                         recpre = rec;
                     }
                 }
             }
+            label19.Text = $"{FromUnixTime(recpre.No).ToString("yyyy-MM-dd HH:mm:ss.ffff")}"; 
             connection.Close();
+        }
+
+        public static DateTime FromUnixTime(long unixTime)
+        {
+            return DateTimeOffset.FromUnixTimeMilliseconds(unixTime).LocalDateTime;
         }
 
         /// チャート初期化
@@ -160,17 +175,16 @@ namespace RSSCacheMonitor
             chart2.Series["Strong"].Color = Color.Green;
             chart2.Series["Weak"].Color = Color.Red;
             chart2.Series["VWAP"].Color = Color.Blue;
-
         }
 
 
         /// <summary>
+        /// 現在値、最良買気配値と最良売気配値
         /// チャート表示
         /// </summary>
         private void ShowChart(double price, double bid, double ask)
         {
             HistoryPrice(price);
-            //var remain = buy_100t.Sum() - sell_100t.Sum();
 
             chart1.ChartAreas[0].AxisY.Maximum = history_price.Max();
             chart1.ChartAreas[0].AxisY.Minimum = history_price.Min();
@@ -184,30 +198,33 @@ namespace RSSCacheMonitor
                     chart1.Series["Price"].Points[i - 1].YValues = chart1.Series["Price"].Points[i].YValues;
                     chart1.Series["Bid"].Points[i - 1].YValues = chart1.Series["Bid"].Points[i].YValues;
                     chart1.Series["Ask"].Points[i - 1].YValues = chart1.Series["Ask"].Points[i].YValues;
-                    //chart1.Series["Remains"].Points[i - 1].YValues = chart1.Series["Remains"].Points[i].YValues;
                 }
                 chart1.Series["Price"].Points.RemoveAt(100);
                 chart1.Series["Bid"].Points.RemoveAt(100);
                 chart1.Series["Ask"].Points.RemoveAt(100);
-                //chart1.Series["Remains"].Points.RemoveAt(100);
             }
             chart1.Series["Price"].Points.AddXY(0, price);
             chart1.Series["Bid"].Points.AddXY(0, bid);
             chart1.Series["Ask"].Points.AddXY(0, ask);
-            //chart1.Series["Remains"].Points.AddXY(0, remain);
         }
 
         /// <summary>
+        /// 現在値と強約定・弱約定の差分（灰色）
         /// チャート表示
         /// </summary>
         private void ShowChart3(double price)
         {
             HistoryPrice(price);
-            var remain = buy_100t.Sum() - sell_100t.Sum();
+            //var remain = buy_100t.Sum() - sell_100t.Sum();
 
             chart3.ChartAreas[0].AxisY.Maximum = history_price.Max();
             chart3.ChartAreas[0].AxisY.Minimum = history_price.Min();
-            chart3.ChartAreas[0].AxisY2.Minimum = -1 * chart3.ChartAreas[0].AxisY2.Maximum;
+            if (chart3.ChartAreas[0].AxisY2.Maximum < _remain * 1.5)
+                chart3.ChartAreas[0].AxisY2.Maximum = _remain * 1.5;
+            if (chart3.ChartAreas[0].AxisY2.Minimum > _remain * 1.5)
+                chart3.ChartAreas[0].AxisY2.Minimum = _remain * 1.5;
+
+            //chart3.ChartAreas[0].AxisY2.Minimum = -2 * chart3.ChartAreas[0].AxisY2.Maximum;
 
 
             if (chart3.Series["Price"].Points.Count > 100)
@@ -221,10 +238,52 @@ namespace RSSCacheMonitor
                 chart3.Series["Remains"].Points.RemoveAt(100);
             }
             chart3.Series["Price"].Points.AddXY(0, price);
-            chart3.Series["Remains"].Points.AddXY(0, remain);
+            chart3.Series["Remains"].Points.AddXY(0, _remain);
+
+            // 相関係数の算出
+            double r = chart3.DataManipulator.Statistics.Correlation("Price", "Remains");
+
+            label21.Text = $"{r}";
+            if (double.Parse(label22.Text) < r && r != 1) label22.Text = $"{r}";
+            if (double.Parse(label24.Text) > r && r != 0) label24.Text = $"{r}";
+
+            //// 相関係数からt-valueへの変換この辺りはこちらで書く必要あり
+            //double t = r * Math.Sqrt((buy_100t.Count - 2) / (1 - r * r));
+
+            //// t-valueからp-valueへの変換 最後の引数はfalseで両側検定になる
+            //double p = chart3.DataManipulator.Statistics.TDistribution(t, buy_100t.Count - 2, false);
+
+            //label26.Text = $"{t}";
+            //label28.Text = $"{p}";
+
+            //
+            // order check
+            //
+            if (chart3.Series["Price"].Points.Count() > 10)
+            {
+
+                var p = chart3.Series["Price"];
+                var p2 = chart3.Series["Remains"];
+                double p_sum = 0;
+                double p2_sum = 0;
+                for (int i = 0; i <= 5; i++)
+                {
+                    p_sum += Math.Log(p.Points[i].YValues[0] / p.Points[i+4].YValues[0]);
+                    p2_sum += Math.Log(p2.Points[i].YValues[0] / p2.Points[i + 4].YValues[0]);
+                }
+                label26.Text = $"{p_sum}";
+                label28.Text = $"{p2_sum}";
+
+                var s = _order.Check("", label9.Text, price, r);
+                if (s != "")
+                {
+                    textBox1.AppendText(s + Environment.NewLine);
+                }
+            }
         }
 
         /// <summary>
+        /// 現在値、強約定、弱約定と VWAP
         /// チャート表示
         /// </summary>
         /// <param name="price"></param>
@@ -235,7 +294,7 @@ namespace RSSCacheMonitor
             HistoryPrice(price);
             var b = buy_100t.Sum();
             var s = sell_100t.Sum();
-            var remain = b - s;
+            //var remain = b - s;
 
             max_strong = (b > max_strong) ? (long)b : max_strong;
             min_Weak = (s < min_Weak) ? (long)s : min_Weak;
@@ -265,9 +324,10 @@ namespace RSSCacheMonitor
             chart2.Series["Weak"].Points.AddXY(0, s);
             chart2.Series["VWAP"].Points.AddXY(0, vwap);
             label8.Text = $"{price}";
-            label10.Text = $"{remain}";
+            label10.Text = $"{_remain}";
             label15.Text = $"{b}";
             label17.Text = $"{s}";
+
         }
 
         private void HistoryPrice(double price)
@@ -279,24 +339,24 @@ namespace RSSCacheMonitor
             history_price.Add(price);
         }
 
-        private ulong HistoryBuyTick(ulong tick)
+        private double HistoryBuyTick(double tick)
         {
             if (buy_100t.Count > MAX_COUNT_TICK)
             {
                 buy_100t.RemoveAt(0);
             }
             buy_100t.Add(tick);
-            return (ulong)buy_100t.Sum();
+            return (double)buy_100t.Sum();
         }
 
-        private ulong HistorySellTick(ulong tick)
+        private double HistorySellTick(double tick)
         {
             if (sell_100t.Count > MAX_COUNT_TICK)
             {
                 sell_100t.RemoveAt(0);
             }
             sell_100t.Add(tick);
-            return (ulong)sell_100t.Sum();
+            return (double)sell_100t.Sum();
         }
 
         private void Initialize()
@@ -336,7 +396,6 @@ namespace RSSCacheMonitor
 
         /*********************************************************************************/
 
-
         public Form1()
         {
             InitializeComponent();
@@ -348,7 +407,7 @@ namespace RSSCacheMonitor
         {
             //txtPath.Text = @"C:\RSS_DATA\20190704_RSS_4565.db";
             txtPath.Text = @"C:\RSS_DATA\20190718_RSS_4565.db";
-            path = txtPath.Text;
+            _path = txtPath.Text;
         }
 
         private void timer1_Tick(object sender, EventArgs e)
@@ -369,9 +428,9 @@ namespace RSSCacheMonitor
             {
                 txtPath.Text = d.FileName;
             }
-
+            _path = txtPath.Text;
         }
-        
+
         // コマ送りボタン
         private void btnPlay_Click(object sender, EventArgs e)
         {
@@ -381,6 +440,7 @@ namespace RSSCacheMonitor
         // 監視開始ボタン
         private void btnView_Click(object sender, EventArgs e)
         {
+            _path = txtPath.Text;
             timer1.Enabled = (timer1.Enabled == true ) ? false : true;
             btnView.Text = (timer1.Enabled == true) ? "停止" : "開始";
         }
