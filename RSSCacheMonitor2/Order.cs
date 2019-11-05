@@ -12,10 +12,17 @@ namespace RSSCacheMonitor
         private double _pos_price = 0;
         private bool _isProfit = false;
         private double _profit_sum = 0;
+        private bool _backtest;
+
+        public bool Backtest {
+            set { _backtest = value; }
+            get { return _backtest; }
+        }
 
         public string Check(string code, string time, double price, double r)
         {
-            Console.WriteLine($"{time},{price},{r}");
+            if (!_backtest)
+                Console.WriteLine($"{time},{price},{r}");
 
             // 価格と売買残高を比較して、高値掴みを避ける
             //float ratio_price = _cli.RatioPrice;
@@ -28,10 +35,9 @@ namespace RSSCacheMonitor
                 if (r < 0.25)
                 {
                     //// 売買残高より、価格の方が下がっていた場合
-                    //if ( ratio_price < ratio_remain)
-                    //{
+
                     //ポジションなしの時、相関係数0.25以下で買い
-                    //_client.Write($"buy,{_monitorCode},{_cli.Time},{_cli.Price},{r}");
+
                     result = $"buy,{code},{time},{price},{r:F4}";
                     _isPosition = true;
                     _pos_price = price;
@@ -49,6 +55,7 @@ namespace RSSCacheMonitor
                     if (profit < 0)
                     {
                         // 利益がなく、相関係数 0.95 を超えていたら損切する
+                        _isProfit = false;
                         _isPosition = false;
                         _profit_sum += profit;
                         result = $"sell,{code},{time},{price},{r:F4},{profit},{_profit_sum}";

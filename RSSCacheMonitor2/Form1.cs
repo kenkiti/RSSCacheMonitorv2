@@ -57,7 +57,7 @@ namespace RSSCacheMonitor
         const int MAX_POINTS = 120;
 
         // オーダーチェック
-        private Order _order = new Order();
+        private Order _order = null; // new Order();
         private double _remain = 0; 
 
 
@@ -190,7 +190,7 @@ namespace RSSCacheMonitor
                         }
 
                         // Tick 表示
-                        ShowTick(rec.Time, rec.Tick, rec.Price, kind);
+                        //ShowTick(rec.Time, rec.Tick, rec.Price, kind);
 
                         // 同一気配約定分析
                         // 
@@ -212,8 +212,11 @@ namespace RSSCacheMonitor
                             }
                             strong = 0;
                             weak = 0;
+
                             ShowChart2(rec.Price, rec.Vwap);
                         }
+
+                        // チャートの描画、オーダー処理を行う
                         ShowChart3(rec.Price);
                         recpre = rec;
                     }
@@ -223,6 +226,75 @@ namespace RSSCacheMonitor
             connection.Close();
         }
 
+        /// <summary>
+        /// 現在値と強約定・弱約定の差分（灰色）
+        /// チャート表示
+        /// </summary>
+        private void ShowChart3(double price)
+        {
+            HistoryPrice(price);
+
+            chart3.ChartAreas[0].AxisY.Maximum = history_price.Max();
+            chart3.ChartAreas[0].AxisY.Minimum = history_price.Min();
+
+
+            if (chart3.Series["Price"].Points.Count > MAX_POINTS)
+            {
+                for (int i = 1; i <= MAX_POINTS; i++)
+                {
+                    chart3.Series["Price"].Points[i - 1].YValues = chart3.Series["Price"].Points[i].YValues;
+                    chart3.Series["Remains"].Points[i - 1].YValues = chart3.Series["Remains"].Points[i].YValues;
+                }
+                chart3.Series["Price"].Points.RemoveAt(MAX_POINTS);
+                chart3.Series["Remains"].Points.RemoveAt(MAX_POINTS);
+            }
+            chart3.Series["Price"].Points.AddXY(0, price);
+            chart3.Series["Remains"].Points.AddXY(0, _remain);
+
+            // 相関係数の算出
+            double r = chart3.DataManipulator.Statistics.Correlation("Price", "Remains");
+
+            label21.Text = $"{r:F4}";
+            if (double.Parse(label22.Text) < r && r != 1) label22.Text = $"{r:F4}";
+            if (double.Parse(label24.Text) > r && r != 0) label24.Text = $"{r:F4}";
+
+            //// 相関係数からt-valueへの変換この辺りはこちらで書く必要あり
+            //double t = r * Math.Sqrt((buy_100t.Count - 2) / (1 - r * r));
+            //// t-valueからp-valueへの変換 最後の引数はfalseで両側検定になる
+            //double p = chart3.DataManipulator.Statistics.TDistribution(t, buy_100t.Count - 2, false);
+            //label26.Text = $"{t}";
+            //label28.Text = $"{p}";
+
+
+            // 
+            // 取引処理
+
+            // チャートにデータが10個溜まるまで、取引しない
+            if (chart3.Series["Remains"].Points.Count() > 10)
+            {
+                // 直近5足分の平均値を計算してみる ----from here
+                var p = chart3.Series["Price"];
+                var p2 = chart3.Series["Remains"];
+                double p_sum = 0;
+                double p2_sum = 0;
+                for (int i = 0; i <= 5; i++)
+                {
+                    p_sum += Math.Log(p.Points[i].YValues[0] / p.Points[i + 4].YValues[0]);
+                    p2_sum += Math.Log(p2.Points[i].YValues[0] / p2.Points[i + 4].YValues[0]);
+                }
+                label26.Text = $"{p_sum:F4}";
+                label28.Text = $"{p2_sum:F4}";
+                // あまり意味がない？ --- to here
+
+                //chart3.Series["VWAP"].Points
+
+                var s = _order.Check("", label9.Text, price, r);
+                if (s != "")
+                {
+                    textBox1.AppendText(s + Environment.NewLine);
+                }
+            }
+        }
 
 
         public static DateTime FromUnixTime(long unixTime)
@@ -289,80 +361,6 @@ namespace RSSCacheMonitor
             chart1.Series["Price"].Points.AddXY(0, price);
             chart1.Series["Bid"].Points.AddXY(0, bid);
             chart1.Series["Ask"].Points.AddXY(0, ask);
-        }
-
-        /// <summary>
-        /// 現在値と強約定・弱約定の差分（灰色）
-        /// チャート表示
-        /// </summary>
-        private void ShowChart3(double price)
-        {
-            HistoryPrice(price);
-
-            chart3.ChartAreas[0].AxisY.Maximum = history_price.Max();
-            chart3.ChartAreas[0].AxisY.Minimum = history_price.Min();
-
-
-            if (chart3.Series["Price"].Points.Count > MAX_POINTS)
-            {
-                for (int i = 1; i <= MAX_POINTS; i++)
-                {
-                    chart3.Series["Price"].Points[i - 1].YValues = chart3.Series["Price"].Points[i].YValues;
-                    chart3.Series["Remains"].Points[i - 1].YValues = chart3.Series["Remains"].Points[i].YValues;
-                }
-                chart3.Series["Price"].Points.RemoveAt(MAX_POINTS);
-                chart3.Series["Remains"].Points.RemoveAt(MAX_POINTS);
-            }
-            chart3.Series["Price"].Points.AddXY(0, price);
-            chart3.Series["Remains"].Points.AddXY(0, _remain);
-
-            // 相関係数の算出
-            double r = chart3.DataManipulator.Statistics.Correlation("Price", "Remains");
-
-            label21.Text = $"{r:F4}";
-            if (double.Parse(label22.Text) < r && r != 1) label22.Text = $"{r:F4}";
-            if (double.Parse(label24.Text) > r && r != 0) label24.Text = $"{r:F4}";
-
-            //// 相関係数からt-valueへの変換この辺りはこちらで書く必要あり
-            //double t = r * Math.Sqrt((buy_100t.Count - 2) / (1 - r * r));
-            //// t-valueからp-valueへの変換 最後の引数はfalseで両側検定になる
-            //double p = chart3.DataManipulator.Statistics.TDistribution(t, buy_100t.Count - 2, false);
-            //label26.Text = $"{t}";
-            //label28.Text = $"{p}";
-
-            //
-            // order check
-            //
-
-            //double sum = 0;
-            //for(int i = 1; i <= 30; i++)
-            //{
-            //    sum += chart3.Series["Remains"].Points[i].YValues[0];
-            //}
-            //double avg = sum / 30;
-            //label26.Text = $"{avg:F4}";
-
-            if (chart3.Series["Remains"].Points.Count() > 10)
-            {
-
-                var p = chart3.Series["Price"];
-                var p2 = chart3.Series["Remains"];
-                double p_sum = 0;
-                double p2_sum = 0;
-                for (int i = 0; i <= 5; i++)
-                {
-                    p_sum += Math.Log(p.Points[i].YValues[0] / p.Points[i + 4].YValues[0]);
-                    p2_sum += Math.Log(p2.Points[i].YValues[0] / p2.Points[i + 4].YValues[0]);
-                }
-                label26.Text = $"{p_sum:F4}";
-                label28.Text = $"{p2_sum:F4}";
-
-                var s = _order.Check("", label9.Text, price, r);
-                if (s != "")
-                {
-                    textBox1.AppendText(s + Environment.NewLine);
-                }
-            }
         }
 
         /// <summary>
@@ -544,6 +542,9 @@ namespace RSSCacheMonitor
         private void button1_Click(object sender, EventArgs e)
         {
             InitializeChart();
+            textBox1.Clear();
+            _order = new Order();
+            _remain = 0;
             MonitoringDatabase2();
         }
     }
